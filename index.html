@@ -8,8 +8,12 @@
   #stage { background:#000; touch-action:none; }
   .row { margin:12px 0; }
   button, input[type=text] { padding:8px 12px; font-size:14px; }
-  #result img { border:2px solid #6c6; margin-top:10px; }
+  #result { margin-top:10px; }
+  #result img { border:2px solid #6c6; max-width:300px; }
+  #urlBox { background:#333; padding:12px; border-radius:8px; display:inline-block; margin-top:10px; }
+  #urlBox input { width:320px; }
   small { color:#999; }
+  #status { color:#ff6; }
 </style>
 </head>
 <body>
@@ -20,12 +24,12 @@
 </div>
 <div class="row">
   <input type="text" id="urlInput" placeholder="이미지 주소 붙여넣기" size="40">
-  <button id="urlBtn">이 주소 불러오기</button><br>
-  <small>※ 일부 사이트는 정책상 지금 단계에서는 안 불러와질 수 있어요 (3단계에서 해결 예정)</small>
+  <button id="urlBtn">이 주소 불러오기</button>
 </div>
 <div class="row">
   <small>사각형 위를 클릭한 뒤, Win+Shift+S로 캡처하고 Ctrl+V 하면 붙여넣기 됩니다</small>
 </div>
+<div id="status"></div>
 
 <h2>2. 액자 종류 선택 &amp; 잘라낼 영역 자유롭게 드래그 (선택 안 해도 됨)</h2>
 <div class="row">
@@ -41,13 +45,15 @@
   <button id="clearBtn">선택 초기화 (원본 전체 사용)</button>
 </div>
 
-<h2>3. 결과 확인 (업로드는 다음 단계에서 연결)</h2>
+<h2>3. 업로드</h2>
 <div class="row">
-  <button id="exportBtn">이미지 만들기</button>
+  <button id="exportBtn">이미지 만들기 + 업로드</button>
 </div>
 <div id="result"></div>
 
 <script>
+const WORKER_URL = "https://rust-sil-worker.shachito.workers.dev";
+
 const DISPLAY = 500;
 const stage = document.getElementById('stage');
 const ctx = stage.getContext('2d');
@@ -57,14 +63,14 @@ const urlBtn = document.getElementById('urlBtn');
 const clearBtn = document.getElementById('clearBtn');
 const exportBtn = document.getElementById('exportBtn');
 const resultDiv = document.getElementById('result');
+const statusDiv = document.getElementById('status');
 const frameRadios = document.getElementsByName('frame');
 
 let frame = 'XL';
 let img = null;
 
 let drawX=0, drawY=0, drawW=0, drawH=0, dispScale=1;
-
-let box = null; // {x,y,w,h} 원본 이미지 좌표계, null이면 선택없음(=전체사용)
+let box = null;
 
 const HANDLE = 10;
 let mode = null;
@@ -82,8 +88,12 @@ function loadImage(src){
     fitDisplay();
     box = null;
     draw();
+    statusDiv.textContent = '';
   };
-  image.onerror = () => alert('이미지를 불러오지 못했습니다. (이 주소는 다른 사이트에서 가져오는 걸 막아놨을 수 있어요)');
+  image.onerror = () => {
+    statusDiv.textContent = '';
+    alert('이미지를 불러오지 못했습니다.');
+  };
   image.src = src;
 }
 
@@ -112,7 +122,6 @@ function draw(){
   ctx.clearRect(0,0,DISPLAY,DISPLAY);
   if (!img) return;
   ctx.drawImage(img, drawX, drawY, drawW, drawH);
-
   if (!box) return;
 
   ctx.save();
@@ -220,8 +229,13 @@ fileInput.addEventListener('change', e => {
   if (file) loadImage(URL.createObjectURL(file));
 });
 
+// URL 불러오기: Worker 프록시를 거쳐서 CORS 문제 없이 불러옴
 urlBtn.addEventListener('click', () => {
-  if (urlInput.value.trim()) loadImage(urlInput.value.trim());
+  const target = urlInput.value.trim();
+  if (!target) return;
+  statusDiv.textContent = '이미지 불러오는 중...';
+  const proxied = `${WORKER_URL}/fetch-image?url=${encodeURIComponent(target)}`;
+  loadImage(proxied);
 });
 
 stage.tabIndex = 0;
@@ -262,18 +276,37 @@ exportBtn.addEventListener('click', () => {
     finalCanvas = rot;
   }
 
-  try {
-    finalCanvas.toBlob(blob => {
-      const url = URL.createObjectURL(blob);
+  finalCanvas.toBlob(async blob => {
+    resultDiv.innerHTML = '<p>업로드 중...</p>';
+    try {
+      const resp = await fetch(`${WORKER_URL}/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: blob
+      });
+      if (!resp.ok) throw new Error('업로드 실패');
+      const data = await resp.json();
+      const sil = `/sil ${data.url}`;
+
       resultDiv.innerHTML = `
-        <p>완성! (${(blob.size/1024).toFixed(0)} KB, ${finalCanvas.width}x${finalCanvas.height})</p>
-        <img src="${url}" style="max-width:300px;">
-        <p><a href="${url}" download="output.jpg">다운로드해서 확인해보기</a></p>
+        <p>완성! (${(blob.size/1024).toFixed(0)} KB, ${finalCanvas.width}x${finalCanvas.height}) — 30분 뒤 자동 삭제됩니다</p>
+        <img src="${data.url}">
+        <div id="urlBox">
+          <input type="text" id="urlText" value="${sil}" readonly>
+          <button id="copyBtn">복사</button>
+        </div>
       `;
-    }, 'image/jpeg', 0.92);
-  } catch(err){
-    alert('이 이미지 주소는 보안 정책 때문에 지금 단계에서는 저장할 수 없어요. (3단계에서 해결됩니다)');
-  }
+      document.getElementById('copyBtn').addEventListener('click', () => {
+        const txt = document.getElementById('urlText');
+        txt.select();
+        navigator.clipboard.writeText(txt.value).then(() => {
+          document.getElementById('copyBtn').textContent = '복사됨!';
+        });
+      });
+    } catch (err) {
+      resultDiv.innerHTML = `<p style="color:#f66;">업로드 실패: ${err.message}</p>`;
+    }
+  }, 'image/jpeg', 0.92);
 });
 </script>
 </body>
