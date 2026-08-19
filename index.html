@@ -27,15 +27,15 @@
   <small>사각형 위를 클릭한 뒤, Win+Shift+S로 캡처하고 Ctrl+V 하면 붙여넣기 됩니다</small>
 </div>
 
-<h2>2. 액자 종류 선택 &amp; 잘라낼 영역 선택 (선택 안 해도 됨)</h2>
+<h2>2. 액자 종류 선택 &amp; 잘라낼 영역 자유롭게 드래그 (선택 안 해도 됨)</h2>
 <div class="row">
-  <label><input type="radio" name="frame" value="XL" checked> XL (정사각형)</label>
-  <label style="margin-left:20px"><input type="radio" name="frame" value="XXL"> XXL (세로 2배, 업로드시 왼쪽으로 90도 회전)</label>
+  <label><input type="radio" name="frame" value="XL" checked> XL</label>
+  <label style="margin-left:20px"><input type="radio" name="frame" value="XXL"> XXL (업로드시 왼쪽으로 90도 회전)</label>
 </div>
 
 <canvas id="stage" width="500" height="500"></canvas>
 <div class="row">
-  <small>빈 곳을 드래그 → 새로 선택 / 모서리 드래그 → 크기 조절 / 안쪽 드래그 → 이동</small>
+  <small>빈 곳을 드래그 → 새로 선택(비율 자유) / 모서리 드래그 → 크기 조절 / 안쪽 드래그 → 이동</small>
 </div>
 <div class="row">
   <button id="clearBtn">선택 초기화 (원본 전체 사용)</button>
@@ -59,27 +59,20 @@ const exportBtn = document.getElementById('exportBtn');
 const resultDiv = document.getElementById('result');
 const frameRadios = document.getElementsByName('frame');
 
-const TARGET = { XL:{w:512,h:512}, XXL:{w:512,h:1024} };
 let frame = 'XL';
 let img = null;
 
-let drawX=0, drawY=0, drawW=0, drawH=0, dispScale=1; // 화면상 이미지 배치
+let drawX=0, drawY=0, drawW=0, drawH=0, dispScale=1;
 
 let box = null; // {x,y,w,h} 원본 이미지 좌표계, null이면 선택없음(=전체사용)
 
-const HANDLE = 10; // 모서리 손잡이 히트 영역(화면 px)
-let mode = null;   // 'create' | 'move' | 'resize'
-let resizeCorner = null; // 'tl','tr','bl','br'
+const HANDLE = 10;
+let mode = null;
+let resizeCorner = null;
 let startPtImg = {x:0,y:0};
 let boxStart = null;
 
-function aspect(){ const t=TARGET[frame]; return t.w/t.h; }
-
-frameRadios.forEach(r => r.addEventListener('change', e => {
-  frame = e.target.value;
-  box = null;
-  draw();
-}));
+frameRadios.forEach(r => r.addEventListener('change', e => { frame = e.target.value; }));
 
 function loadImage(src){
   const image = new Image();
@@ -122,7 +115,6 @@ function draw(){
 
   if (!box) return;
 
-  // 선택 밖 어둡게
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   const s = toScreen(box.x, box.y);
@@ -137,7 +129,6 @@ function draw(){
   ctx.lineWidth = 2;
   ctx.strokeRect(s.x, s.y, bw, bh);
 
-  // 모서리 손잡이
   ctx.fillStyle = '#6c6';
   [[s.x,s.y],[s.x+bw,s.y],[s.x,s.y+bh],[s.x+bw,s.y+bh]].forEach(p=>{
     ctx.fillRect(p[0]-HANDLE/2, p[1]-HANDLE/2, HANDLE, HANDLE);
@@ -148,9 +139,7 @@ function hitCorner(px, py){
   if (!box) return null;
   const s = toScreen(box.x, box.y);
   const bw = box.w*dispScale, bh = box.h*dispScale;
-  const corners = {
-    tl:[s.x,s.y], tr:[s.x+bw,s.y], bl:[s.x,s.y+bh], br:[s.x+bw,s.y+bh]
-  };
+  const corners = { tl:[s.x,s.y], tr:[s.x+bw,s.y], bl:[s.x,s.y+bh], br:[s.x+bw,s.y+bh] };
   for (const k in corners){
     const [cx,cy] = corners[k];
     if (Math.abs(px-cx)<HANDLE && Math.abs(py-cy)<HANDLE) return k;
@@ -191,17 +180,13 @@ window.addEventListener('pointermove', e => {
   const rect = stage.getBoundingClientRect();
   const px = e.clientX-rect.left, py = e.clientY-rect.top;
   const ip = toImgCoord(px, py);
-  const r = aspect();
 
   if (mode === 'create'){
-    const dx = ip.x - startPtImg.x, dy = ip.y - startPtImg.y;
-    let w, h;
-    if (Math.abs(dx)/r > Math.abs(dy)) { w = Math.abs(dx); h = w/r; }
-    else { h = Math.abs(dy); w = h*r; }
     box = {
-      x: dx>=0 ? startPtImg.x : startPtImg.x-w,
-      y: dy>=0 ? startPtImg.y : startPtImg.y-h,
-      w, h
+      x: Math.min(startPtImg.x, ip.x),
+      y: Math.min(startPtImg.y, ip.y),
+      w: Math.abs(ip.x - startPtImg.x),
+      h: Math.abs(ip.y - startPtImg.y)
     };
     clampBoxToImage(box);
   }
@@ -211,21 +196,17 @@ window.addEventListener('pointermove', e => {
     clampBoxToImage(box);
   }
   else if (mode === 'resize'){
-    // 고정된 반대쪽 모서리(anchor) 기준으로 재계산 (비율 유지)
     let anchor;
     if (resizeCorner==='br') anchor = {x:boxStart.x, y:boxStart.y};
     if (resizeCorner==='bl') anchor = {x:boxStart.x+boxStart.w, y:boxStart.y};
     if (resizeCorner==='tr') anchor = {x:boxStart.x, y:boxStart.y+boxStart.h};
     if (resizeCorner==='tl') anchor = {x:boxStart.x+boxStart.w, y:boxStart.y+boxStart.h};
 
-    const dx = ip.x - anchor.x, dy = ip.y - anchor.y;
-    let w, h;
-    if (Math.abs(dx)/r > Math.abs(dy)) { w = Math.abs(dx); h = w/r; }
-    else { h = Math.abs(dy); w = h*r; }
     box = {
-      x: dx>=0 ? anchor.x : anchor.x-w,
-      y: dy>=0 ? anchor.y : anchor.y-h,
-      w, h
+      x: Math.min(anchor.x, ip.x),
+      y: Math.min(anchor.y, ip.y),
+      w: Math.abs(ip.x - anchor.x),
+      h: Math.abs(ip.y - anchor.y)
     };
     clampBoxToImage(box);
   }
@@ -234,18 +215,15 @@ window.addEventListener('pointermove', e => {
 
 window.addEventListener('pointerup', () => { mode = null; });
 
-// 파일 첨부
 fileInput.addEventListener('change', e => {
   const file = e.target.files[0];
   if (file) loadImage(URL.createObjectURL(file));
 });
 
-// URL 불러오기
 urlBtn.addEventListener('click', () => {
   if (urlInput.value.trim()) loadImage(urlInput.value.trim());
 });
 
-// 클립보드 붙여넣기
 stage.tabIndex = 0;
 stage.addEventListener('click', () => stage.focus());
 document.addEventListener('paste', e => {
@@ -259,12 +237,11 @@ document.addEventListener('paste', e => {
 
 clearBtn.addEventListener('click', () => { box = null; draw(); });
 
-// 최종 이미지 만들기
 exportBtn.addEventListener('click', () => {
   if (!img){ alert('먼저 이미지를 넣어주세요.'); return; }
 
   let out;
-  if (box){
+  if (box && box.w > 0 && box.h > 0){
     out = document.createElement('canvas');
     out.width = Math.round(box.w); out.height = Math.round(box.h);
     out.getContext('2d').drawImage(img, box.x, box.y, box.w, box.h, 0, 0, out.width, out.height);
