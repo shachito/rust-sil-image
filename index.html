@@ -1,10 +1,192 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>러스트 액자 이미지 도구</title>
+<meta charset="UTF-8">
+<title>러스트 액자 이미지 도구</title>
+<style>
+  body { font-family: sans-serif; background:#222; color:#eee; text-align:center; padding:20px; }
+  #stage { background:#444; touch-action:none; cursor:grab; }
+  #stage:active { cursor:grabbing; }
+  .row { margin:12px 0; }
+  button, input[type=text] { padding:8px 12px; font-size:14px; }
+  #result img { border:2px solid #6c6; margin-top:10px; }
+</style>
 </head>
 <body>
-  <h1>사이트가 정상적으로 떴습니다!</h1>
+
+<h2>1. 이미지 붙여넣기</h2>
+<div class="row">
+  <input type="file" id="fileInput" accept="image/*">
+</div>
+<div class="row">
+  <input type="text" id="urlInput" placeholder="이미지 주소 붙여넣기" size="40">
+  <button id="urlBtn">이 주소 불러오기</button>
+</div>
+<div class="row">
+  (여기 사각형 위를 한번 클릭한 뒤, Win+Shift+S로 캡처하고 Ctrl+V 하면 붙여넣기 됩니다)
+</div>
+
+<h2>2. 액자 종류 선택 &amp; 편집</h2>
+<div class="row">
+  <label><input type="radio" name="frame" value="XL" checked> XL (512x512)</label>
+  <label style="margin-left:20px"><input type="radio" name="frame" value="XXL"> XXL (512x1024, 업로드시 자동회전)</label>
+</div>
+
+<canvas id="stage" width="512" height="512" style="width:320px;height:320px;"></canvas>
+
+<div class="row">
+  확대/축소: <input type="range" id="zoom" min="100" max="400" value="100" style="width:250px;">
+  <button id="resetBtn">위치 초기화</button>
+</div>
+
+<h2>3. 결과 확인 (업로드는 다음 단계에서 연결)</h2>
+<div class="row">
+  <button id="exportBtn">이미지 만들기</button>
+</div>
+<div id="result"></div>
+
+<script>
+const stage = document.getElementById('stage');
+const ctx = stage.getContext('2d');
+const fileInput = document.getElementById('fileInput');
+const urlInput = document.getElementById('urlInput');
+const urlBtn = document.getElementById('urlBtn');
+const zoomSlider = document.getElementById('zoom');
+const resetBtn = document.getElementById('resetBtn');
+const exportBtn = document.getElementById('exportBtn');
+const resultDiv = document.getElementById('result');
+const frameRadios = document.getElementsByName('frame');
+
+const SIZES = { XL:{w:512,h:512, dispW:320, dispH:320}, XXL:{w:512,h:1024, dispW:240, dispH:480} };
+let frame = 'XL';
+let img = null;
+let fitScale = 1, scale = 1, offsetX = 0, offsetY = 0;
+let dragging = false, dragStartX=0, dragStartY=0, startOffX=0, startOffY=0;
+
+function setFrame(f){
+  frame = f;
+  const s = SIZES[f];
+  stage.width = s.w; stage.height = s.h;
+  stage.style.width = s.dispW+'px';
+  stage.style.height = s.dispH+'px';
+  if (img) fitImage();
+  draw();
+}
+frameRadios.forEach(r => r.addEventListener('change', e => setFrame(e.target.value)));
+
+function loadImage(src){
+  const image = new Image();
+  image.crossOrigin = 'anonymous';
+  image.onload = () => { img = image; fitImage(); draw(); };
+  image.onerror = () => alert('이미지를 불러오지 못했습니다. (주소 방식은 사이트에 따라 막힐 수 있어요)');
+  image.src = src;
+}
+
+function fitImage(){
+  fitScale = Math.max(stage.width/img.width, stage.height/img.height);
+  scale = fitScale;
+  offsetX = (stage.width - img.width*scale)/2;
+  offsetY = (stage.height - img.height*scale)/2;
+  zoomSlider.value = 100;
+  clamp();
+}
+
+function clamp(){
+  const iw = img.width*scale, ih = img.height*scale;
+  if (offsetX > 0) offsetX = 0;
+  if (offsetY > 0) offsetY = 0;
+  if (offsetX + iw < stage.width) offsetX = stage.width - iw;
+  if (offsetY + ih < stage.height) offsetY = stage.height - ih;
+}
+
+function draw(){
+  ctx.clearRect(0,0,stage.width,stage.height);
+  if (img) ctx.drawImage(img, offsetX, offsetY, img.width*scale, img.height*scale);
+}
+
+// 파일 첨부
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) loadImage(URL.createObjectURL(file));
+});
+
+// URL 붙여넣기
+urlBtn.addEventListener('click', () => {
+  if (urlInput.value.trim()) loadImage(urlInput.value.trim());
+});
+
+// 클립보드 붙여넣기 (Win+Shift+S 후 Ctrl+V)
+stage.addEventListener('click', () => stage.focus());
+stage.tabIndex = 0;
+document.addEventListener('paste', e => {
+  const items = e.clipboardData.items;
+  for (const item of items){
+    if (item.type.startsWith('image/')){
+      const blob = item.getAsFile();
+      loadImage(URL.createObjectURL(blob));
+    }
+  }
+});
+
+// 드래그로 이동
+stage.addEventListener('pointerdown', e => {
+  if (!img) return;
+  dragging = true;
+  dragStartX = e.clientX; dragStartY = e.clientY;
+  startOffX = offsetX; startOffY = offsetY;
+});
+window.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const ratio = stage.width / stage.clientWidth;
+  offsetX = startOffX + (e.clientX - dragStartX) * ratio;
+  offsetY = startOffY + (e.clientY - dragStartY) * ratio;
+  clamp();
+  draw();
+});
+window.addEventListener('pointerup', () => dragging = false);
+
+// 확대/축소
+zoomSlider.addEventListener('input', () => {
+  const newScale = fitScale * (zoomSlider.value/100);
+  const cx = stage.width/2, cy = stage.height/2;
+  const imgX = (cx - offsetX)/scale, imgY = (cy - offsetY)/scale;
+  scale = newScale;
+  offsetX = cx - imgX*scale;
+  offsetY = cy - imgY*scale;
+  clamp();
+  draw();
+});
+
+resetBtn.addEventListener('click', () => { if (img) fitImage(); draw(); });
+
+// 최종 이미지 만들기 (JPG로 저장, XXL은 회전)
+exportBtn.addEventListener('click', () => {
+  if (!img){ alert('먼저 이미지를 넣어주세요.'); return; }
+  const s = SIZES[frame];
+  const out = document.createElement('canvas');
+  out.width = s.w; out.height = s.h;
+  out.getContext('2d').drawImage(stage, 0,0);
+
+  let finalCanvas = out;
+  if (frame === 'XXL'){
+    const rot = document.createElement('canvas');
+    rot.width = s.h; rot.height = s.w; // 512x1024 -> 1024x512
+    const rctx = rot.getContext('2d');
+    rctx.translate(rot.width/2, rot.height/2);
+    rctx.rotate(90 * Math.PI/180);
+    rctx.drawImage(out, -out.width/2, -out.height/2);
+    finalCanvas = rot;
+  }
+
+  finalCanvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    resultDiv.innerHTML = `
+      <p>완성! (${(blob.size/1024).toFixed(0)} KB, ${finalCanvas.width}x${finalCanvas.height})</p>
+      <img src="${url}" style="max-width:300px;">
+      <p><a href="${url}" download="output.jpg">다운로드해서 확인해보기</a></p>
+    `;
+  }, 'image/jpeg', 0.92);
+});
+</script>
 </body>
 </html>
