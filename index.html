@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>러스트 액자 이미지 도구</title>
+<style>
+  body { font-family: sans-serif; background:#222; color:#eee; text-align:center; padding:20px; }
+  #stage { background:#000; touch-action:none; }
+  .row { margin:12px 0; }
+  button, input[type=text] { padding:8px 12px; font-size:14px; }
+  #result img { border:2px solid #6c6; margin-top:10px; }
+  small { color:#999; }
+</style>
+</head>
+<body>
+
+<h2>1. 이미지 붙여넣기</h2>
+<div class="row">
+  <input type="file" id="fileInput" accept="image/*">
+</div>
+<div class="row">
+  <input type="text" id="urlInput" placeholder="이미지 주소 붙여넣기" size="40">
+  <button id="urlBtn">이 주소 불러오기</button><br>
+  <small>※ 일부 사이트는 정책상 지금 단계에서는 안 불러와질 수 있어요 (3단계에서 해결 예정)</small>
+</div>
+<div class="row">
+  <small>사각형 위를 클릭한 뒤, Win+Shift+S로 캡처하고 Ctrl+V 하면 붙여넣기 됩니다</small>
+</div>
+
+<h2>2. 액자 종류 선택 &amp; 잘라낼 영역 선택 (선택 안 해도 됨)</h2>
+<div class="row">
+  <label><input type="radio" name="frame" value="XL" checked> XL (정사각형)</label>
+  <label style="margin-left:20px"><input type="radio" name="frame" value="XXL"> XXL (세로 2배, 업로드시 왼쪽으로 90도 회전)</label>
+</div>
+
+<canvas id="stage" width="500" height="500"></canvas>
+<div class="row">
+  <small>빈 곳을 드래그 → 새로 선택 / 모서리 드래그 → 크기 조절 / 안쪽 드래그 → 이동</small>
+</div>
+<div class="row">
+  <button id="clearBtn">선택 초기화 (원본 전체 사용)</button>
+</div>
+
+<h2>3. 결과 확인 (업로드는 다음 단계에서 연결)</h2>
+<div class="row">
+  <button id="exportBtn">이미지 만들기</button>
+</div>
+<div id="result"></div>
+
+<script>
+const DISPLAY = 500;
+const stage = document.getElementById('stage');
+const ctx = stage.getContext('2d');
+const fileInput = document.getElementById('fileInput');
+const urlInput = document.getElementById('urlInput');
+const urlBtn = document.getElementById('urlBtn');
+const clearBtn = document.getElementById('clearBtn');
+const exportBtn = document.getElementById('exportBtn');
+const resultDiv = document.getElementById('result');
+const frameRadios = document.getElementsByName('frame');
+
+const TARGET = { XL:{w:512,h:512}, XXL:{w:512,h:1024} };
+let frame = 'XL';
+let img = null;
+
+let drawX=0, drawY=0, drawW=0, drawH=0, dispScale=1; // 화면상 이미지 배치
+
+let box = null; // {x,y,w,h} 원본 이미지 좌표계, null이면 선택없음(=전체사용)
+
+const HANDLE = 10; // 모서리 손잡이 히트 영역(화면 px)
+let mode = null;   // 'create' | 'move' | 'resize'
+let resizeCorner = null; // 'tl','tr','bl','br'
+let startPtImg = {x:0,y:0};
+let boxStart = null;
+
+function aspect(){ const t=TARGET[frame]; return t.w/t.h; }
+
+frameRadios.forEach(r => r.addEventListener('change', e => {
+  frame = e.target.value;
+  box = null;
+  draw();
+}));
+
+function loadImage(src){
+  const image = new Image();
+  image.crossOrigin = 'anonymous';
+  image.onload = () => {
+    img = image;
+    fitDisplay();
+    box = null;
+    draw();
+  };
+  image.onerror = () => alert('이미지를 불러오지 못했습니다. (이 주소는 다른 사이트에서 가져오는 걸 막아놨을 수 있어요)');
+  image.src = src;
+}
+
+function fitDisplay(){
+  dispScale = Math.min(DISPLAY/img.width, DISPLAY/img.height);
+  drawW = img.width*dispScale; drawH = img.height*dispScale;
+  drawX = (DISPLAY-drawW)/2; drawY = (DISPLAY-drawH)/2;
+}
+
+function toImgCoord(px, py){
+  return { x: (px-drawX)/dispScale, y: (py-drawY)/dispScale };
+}
+function toScreen(ix, iy){
+  return { x: drawX+ix*dispScale, y: drawY+iy*dispScale };
+}
+
+function clampBoxToImage(b){
+  if (b.x < 0){ b.w += b.x; b.x = 0; }
+  if (b.y < 0){ b.h += b.y; b.y = 0; }
+  if (b.x+b.w > img.width) b.w = img.width-b.x;
+  if (b.y+b.h > img.height) b.h = img.height-b.y;
+  return b;
+}
+
+function draw(){
+  ctx.clearRect(0,0,DISPLAY,DISPLAY);
+  if (!img) return;
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+  if (!box) return;
+
+  // 선택 밖 어둡게
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  const s = toScreen(box.x, box.y);
+  const bw = box.w*dispScale, bh = box.h*dispScale;
+  ctx.beginPath();
+  ctx.rect(0,0,DISPLAY,DISPLAY);
+  ctx.rect(s.x, s.y, bw, bh);
+  ctx.fill('evenodd');
+  ctx.restore();
+
+  ctx.strokeStyle = '#6c6';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(s.x, s.y, bw, bh);
+
+  // 모서리 손잡이
+  ctx.fillStyle = '#6c6';
+  [[s.x,s.y],[s.x+bw,s.y],[s.x,s.y+bh],[s.x+bw,s.y+bh]].forEach(p=>{
+    ctx.fillRect(p[0]-HANDLE/2, p[1]-HANDLE/2, HANDLE, HANDLE);
+  });
+}
+
+function hitCorner(px, py){
+  if (!box) return null;
+  const s = toScreen(box.x, box.y);
+  const bw = box.w*dispScale, bh = box.h*dispScale;
+  const corners = {
+    tl:[s.x,s.y], tr:[s.x+bw,s.y], bl:[s.x,s.y+bh], br:[s.x+bw,s.y+bh]
+  };
+  for (const k in corners){
+    const [cx,cy] = corners[k];
+    if (Math.abs(px-cx)<HANDLE && Math.abs(py-cy)<HANDLE) return k;
+  }
+  return null;
+}
+
+function insideBox(px, py){
+  if (!box) return false;
+  const s = toScreen(box.x, box.y);
+  const bw = box.w*dispScale, bh = box.h*dispScale;
+  return px>=s.x && px<=s.x+bw && py>=s.y && py<=s.y+bh;
+}
+
+stage.addEventListener('pointerdown', e => {
+  if (!img) return;
+  const rect = stage.getBoundingClientRect();
+  const px = e.clientX-rect.left, py = e.clientY-rect.top;
+  const corner = hitCorner(px, py);
+  const ip = toImgCoord(px, py);
+
+  if (corner){
+    mode = 'resize'; resizeCorner = corner;
+    boxStart = {...box};
+  } else if (insideBox(px, py)){
+    mode = 'move';
+    boxStart = {...box};
+    startPtImg = ip;
+  } else {
+    mode = 'create';
+    startPtImg = ip;
+    box = {x:ip.x, y:ip.y, w:0, h:0};
+  }
+});
+
+window.addEventListener('pointermove', e => {
+  if (!mode || !img) return;
+  const rect = stage.getBoundingClientRect();
+  const px = e.clientX-rect.left, py = e.clientY-rect.top;
+  const ip = toImgCoord(px, py);
+  const r = aspect();
+
+  if (mode === 'create'){
+    const dx = ip.x - startPtImg.x, dy = ip.y - startPtImg.y;
+    let w, h;
+    if (Math.abs(dx)/r > Math.abs(dy)) { w = Math.abs(dx); h = w/r; }
+    else { h = Math.abs(dy); w = h*r; }
+    box = {
+      x: dx>=0 ? startPtImg.x : startPtImg.x-w,
+      y: dy>=0 ? startPtImg.y : startPtImg.y-h,
+      w, h
+    };
+    clampBoxToImage(box);
+  }
+  else if (mode === 'move'){
+    const dx = ip.x - startPtImg.x, dy = ip.y - startPtImg.y;
+    box = {x: boxStart.x+dx, y: boxStart.y+dy, w: boxStart.w, h: boxStart.h};
+    clampBoxToImage(box);
+  }
+  else if (mode === 'resize'){
+    // 고정된 반대쪽 모서리(anchor) 기준으로 재계산 (비율 유지)
+    let anchor;
+    if (resizeCorner==='br') anchor = {x:boxStart.x, y:boxStart.y};
+    if (resizeCorner==='bl') anchor = {x:boxStart.x+boxStart.w, y:boxStart.y};
+    if (resizeCorner==='tr') anchor = {x:boxStart.x, y:boxStart.y+boxStart.h};
+    if (resizeCorner==='tl') anchor = {x:boxStart.x+boxStart.w, y:boxStart.y+boxStart.h};
+
+    const dx = ip.x - anchor.x, dy = ip.y - anchor.y;
+    let w, h;
+    if (Math.abs(dx)/r > Math.abs(dy)) { w = Math.abs(dx); h = w/r; }
+    else { h = Math.abs(dy); w = h*r; }
+    box = {
+      x: dx>=0 ? anchor.x : anchor.x-w,
+      y: dy>=0 ? anchor.y : anchor.y-h,
+      w, h
+    };
+    clampBoxToImage(box);
+  }
+  draw();
+});
+
+window.addEventListener('pointerup', () => { mode = null; });
+
+// 파일 첨부
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) loadImage(URL.createObjectURL(file));
+});
+
+// URL 불러오기
+urlBtn.addEventListener('click', () => {
+  if (urlInput.value.trim()) loadImage(urlInput.value.trim());
+});
+
+// 클립보드 붙여넣기
+stage.tabIndex = 0;
+stage.addEventListener('click', () => stage.focus());
+document.addEventListener('paste', e => {
+  const items = e.clipboardData.items;
+  for (const item of items){
+    if (item.type.startsWith('image/')){
+      loadImage(URL.createObjectURL(item.getAsFile()));
+    }
+  }
+});
+
+clearBtn.addEventListener('click', () => { box = null; draw(); });
+
+// 최종 이미지 만들기
+exportBtn.addEventListener('click', () => {
+  if (!img){ alert('먼저 이미지를 넣어주세요.'); return; }
+
+  let out;
+  if (box){
+    out = document.createElement('canvas');
+    out.width = Math.round(box.w); out.height = Math.round(box.h);
+    out.getContext('2d').drawImage(img, box.x, box.y, box.w, box.h, 0, 0, out.width, out.height);
+  } else {
+    out = document.createElement('canvas');
+    out.width = img.width; out.height = img.height;
+    out.getContext('2d').drawImage(img, 0, 0);
+  }
+
+  let finalCanvas = out;
+  if (frame === 'XXL'){
+    const rot = document.createElement('canvas');
+    rot.width = out.height; rot.height = out.width;
+    const rctx = rot.getContext('2d');
+    rctx.translate(rot.width/2, rot.height/2);
+    rctx.rotate(-90 * Math.PI/180);
+    rctx.drawImage(out, -out.width/2, -out.height/2);
+    finalCanvas = rot;
+  }
+
+  try {
+    finalCanvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      resultDiv.innerHTML = `
+        <p>완성! (${(blob.size/1024).toFixed(0)} KB, ${finalCanvas.width}x${finalCanvas.height})</p>
+        <img src="${url}" style="max-width:300px;">
+        <p><a href="${url}" download="output.jpg">다운로드해서 확인해보기</a></p>
+      `;
+    }, 'image/jpeg', 0.92);
+  } catch(err){
+    alert('이 이미지 주소는 보안 정책 때문에 지금 단계에서는 저장할 수 없어요. (3단계에서 해결됩니다)');
+  }
+});
+</script>
+</body>
+</html>
