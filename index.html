@@ -5,11 +5,12 @@
 <title>러스트 액자 이미지 도구</title>
 <style>
   body { font-family: sans-serif; background:#222; color:#eee; text-align:center; padding:20px; }
-  #stage { background:#444; touch-action:none; cursor:grab; }
+  #stage { background:#000; touch-action:none; cursor:grab; }
   #stage:active { cursor:grabbing; }
   .row { margin:12px 0; }
   button, input[type=text] { padding:8px 12px; font-size:14px; }
   #result img { border:2px solid #6c6; margin-top:10px; }
+  small { color:#999; }
 </style>
 </head>
 <body>
@@ -20,23 +21,27 @@
 </div>
 <div class="row">
   <input type="text" id="urlInput" placeholder="이미지 주소 붙여넣기" size="40">
-  <button id="urlBtn">이 주소 불러오기</button>
+  <button id="urlBtn">이 주소 불러오기</button><br>
+  <small>※ 일부 사이트(핀터레스트 등)는 정책상 지금 단계에서는 안 불러와질 수 있어요 (3단계에서 해결 예정)</small>
 </div>
 <div class="row">
-  (여기 사각형 위를 한번 클릭한 뒤, Win+Shift+S로 캡처하고 Ctrl+V 하면 붙여넣기 됩니다)
+  <small>아래 사각형 위를 한번 클릭한 뒤, Win+Shift+S로 캡처하고 Ctrl+V 하면 붙여넣기 됩니다</small>
 </div>
 
-<h2>2. 액자 종류 선택 &amp; 편집</h2>
+<h2>2. 액자 종류 선택 &amp; 영역 선택</h2>
 <div class="row">
-  <label><input type="radio" name="frame" value="XL" checked> XL (512x512)</label>
-  <label style="margin-left:20px"><input type="radio" name="frame" value="XXL"> XXL (512x1024, 업로드시 자동회전)</label>
+  <label><input type="radio" name="frame" value="XL" checked> XL (정사각형)</label>
+  <label style="margin-left:20px"><input type="radio" name="frame" value="XXL"> XXL (세로 2배, 업로드시 왼쪽으로 90도 회전)</label>
 </div>
 
-<canvas id="stage" width="512" height="512" style="width:320px;height:320px;"></canvas>
+<canvas id="stage" width="400" height="400"></canvas>
+<div class="row">
+  <small>사각형 안쪽을 드래그하면 위치 이동, 슬라이더로 확대(선택 영역 좁히기)</small>
+</div>
 
 <div class="row">
-  확대/축소: <input type="range" id="zoom" min="100" max="400" value="100" style="width:250px;">
-  <button id="resetBtn">위치 초기화</button>
+  확대: <input type="range" id="zoom" min="100" max="500" value="100" style="width:250px;">
+  <button id="resetBtn">위치/확대 초기화</button>
 </div>
 
 <h2>3. 결과 확인 (업로드는 다음 단계에서 연결)</h2>
@@ -46,6 +51,7 @@
 <div id="result"></div>
 
 <script>
+const DISPLAY = 400;
 const stage = document.getElementById('stage');
 const ctx = stage.getContext('2d');
 const fileInput = document.getElementById('fileInput');
@@ -57,51 +63,89 @@ const exportBtn = document.getElementById('exportBtn');
 const resultDiv = document.getElementById('result');
 const frameRadios = document.getElementsByName('frame');
 
-const SIZES = { XL:{w:512,h:512, dispW:320, dispH:320}, XXL:{w:512,h:1024, dispW:240, dispH:480} };
+const TARGET = { XL:{w:512,h:512}, XXL:{w:512,h:1024} };
 let frame = 'XL';
 let img = null;
-let fitScale = 1, scale = 1, offsetX = 0, offsetY = 0;
-let dragging = false, dragStartX=0, dragStartY=0, startOffX=0, startOffY=0;
 
-function setFrame(f){
-  frame = f;
-  const s = SIZES[f];
-  stage.width = s.w; stage.height = s.h;
-  stage.style.width = s.dispW+'px';
-  stage.style.height = s.dispH+'px';
-  if (img) fitImage();
+// 화면에 그려지는 이미지의 위치/크기 (레터박스 포함)
+let drawX=0, drawY=0, drawW=0, drawH=0, dispScale=1;
+
+// 선택 박스는 "원본 이미지 좌표계" 기준으로 저장
+let boxX=0, boxY=0, boxW=0, boxH=0;
+let maxBoxW=0, maxBoxH=0; // 슬라이더 100%일 때(=이미지 안에 들어가는 최대 크기)
+
+let dragging=false, dragStartX=0, dragStartY=0, boxStartX=0, boxStartY=0;
+
+function aspect(){ const t=TARGET[frame]; return t.w/t.h; }
+
+frameRadios.forEach(r => r.addEventListener('change', e => {
+  frame = e.target.value;
+  if (img) initBox();
   draw();
-}
-frameRadios.forEach(r => r.addEventListener('change', e => setFrame(e.target.value)));
+}));
 
 function loadImage(src){
   const image = new Image();
   image.crossOrigin = 'anonymous';
-  image.onload = () => { img = image; fitImage(); draw(); };
-  image.onerror = () => alert('이미지를 불러오지 못했습니다. (주소 방식은 사이트에 따라 막힐 수 있어요)');
+  image.onload = () => {
+    img = image;
+    fitDisplay();
+    initBox();
+    draw();
+  };
+  image.onerror = () => alert('이미지를 불러오지 못했습니다. (이 주소는 다른 사이트에서 가져오는 걸 막아놨을 수 있어요)');
   image.src = src;
 }
 
-function fitImage(){
-  fitScale = Math.max(stage.width/img.width, stage.height/img.height);
-  scale = fitScale;
-  offsetX = (stage.width - img.width*scale)/2;
-  offsetY = (stage.height - img.height*scale)/2;
-  zoomSlider.value = 100;
-  clamp();
+function fitDisplay(){
+  dispScale = Math.min(DISPLAY/img.width, DISPLAY/img.height);
+  drawW = img.width*dispScale; drawH = img.height*dispScale;
+  drawX = (DISPLAY-drawW)/2; drawY = (DISPLAY-drawH)/2;
 }
 
-function clamp(){
-  const iw = img.width*scale, ih = img.height*scale;
-  if (offsetX > 0) offsetX = 0;
-  if (offsetY > 0) offsetY = 0;
-  if (offsetX + iw < stage.width) offsetX = stage.width - iw;
-  if (offsetY + ih < stage.height) offsetY = stage.height - ih;
+function initBox(){
+  const r = aspect();
+  if (img.width/img.height > r){
+    maxBoxH = img.height; maxBoxW = maxBoxH*r;
+  } else {
+    maxBoxW = img.width; maxBoxH = maxBoxW/r;
+  }
+  zoomSlider.value = 100;
+  boxW = maxBoxW; boxH = maxBoxH;
+  boxX = (img.width-boxW)/2; boxY = (img.height-boxH)/2;
+}
+
+function clampBox(){
+  if (boxX < 0) boxX = 0;
+  if (boxY < 0) boxY = 0;
+  if (boxX+boxW > img.width) boxX = img.width-boxW;
+  if (boxY+boxH > img.height) boxY = img.height-boxH;
 }
 
 function draw(){
-  ctx.clearRect(0,0,stage.width,stage.height);
-  if (img) ctx.drawImage(img, offsetX, offsetY, img.width*scale, img.height*scale);
+  ctx.clearRect(0,0,DISPLAY,DISPLAY);
+  if (!img) return;
+  // 어둡게 전체 이미지
+  ctx.globalAlpha = 0.35;
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  ctx.globalAlpha = 1;
+
+  // 선택 영역만 밝게
+  const bx = drawX + boxX*dispScale;
+  const by = drawY + boxY*dispScale;
+  const bw = boxW*dispScale;
+  const bh = boxH*dispScale;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bx, by, bw, bh);
+  ctx.clip();
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  ctx.restore();
+
+  ctx.strokeStyle = '#6c6';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bx, by, bw, bh);
 }
 
 // 파일 첨부
@@ -110,82 +154,84 @@ fileInput.addEventListener('change', e => {
   if (file) loadImage(URL.createObjectURL(file));
 });
 
-// URL 붙여넣기
+// URL 불러오기
 urlBtn.addEventListener('click', () => {
   if (urlInput.value.trim()) loadImage(urlInput.value.trim());
 });
 
-// 클립보드 붙여넣기 (Win+Shift+S 후 Ctrl+V)
-stage.addEventListener('click', () => stage.focus());
+// 클립보드 붙여넣기
 stage.tabIndex = 0;
+stage.addEventListener('click', () => stage.focus());
 document.addEventListener('paste', e => {
   const items = e.clipboardData.items;
   for (const item of items){
     if (item.type.startsWith('image/')){
-      const blob = item.getAsFile();
-      loadImage(URL.createObjectURL(blob));
+      loadImage(URL.createObjectURL(item.getAsFile()));
     }
   }
 });
 
-// 드래그로 이동
+// 박스 드래그 이동
 stage.addEventListener('pointerdown', e => {
   if (!img) return;
   dragging = true;
-  dragStartX = e.clientX; dragStartY = e.clientY;
-  startOffX = offsetX; startOffY = offsetY;
+  dragStartX = e.offsetX; dragStartY = e.offsetY;
+  boxStartX = boxX; boxStartY = boxY;
 });
 window.addEventListener('pointermove', e => {
   if (!dragging) return;
-  const ratio = stage.width / stage.clientWidth;
-  offsetX = startOffX + (e.clientX - dragStartX) * ratio;
-  offsetY = startOffY + (e.clientY - dragStartY) * ratio;
-  clamp();
+  const rect = stage.getBoundingClientRect();
+  const curX = e.clientX-rect.left, curY = e.clientY-rect.top;
+  boxX = boxStartX + (curX-dragStartX)/dispScale;
+  boxY = boxStartY + (curY-dragStartY)/dispScale;
+  clampBox();
   draw();
 });
-window.addEventListener('pointerup', () => dragging = false);
+window.addEventListener('pointerup', () => dragging=false);
 
-// 확대/축소
+// 확대 슬라이더 (값이 클수록 선택영역이 좁아짐 = 확대됨)
 zoomSlider.addEventListener('input', () => {
-  const newScale = fitScale * (zoomSlider.value/100);
-  const cx = stage.width/2, cy = stage.height/2;
-  const imgX = (cx - offsetX)/scale, imgY = (cy - offsetY)/scale;
-  scale = newScale;
-  offsetX = cx - imgX*scale;
-  offsetY = cy - imgY*scale;
-  clamp();
+  const factor = 100/zoomSlider.value;
+  const cx = boxX + boxW/2, cy = boxY + boxH/2;
+  boxW = maxBoxW*factor; boxH = maxBoxH*factor;
+  boxX = cx - boxW/2; boxY = cy - boxH/2;
+  clampBox();
   draw();
 });
 
-resetBtn.addEventListener('click', () => { if (img) fitImage(); draw(); });
+resetBtn.addEventListener('click', () => { if (img){ initBox(); draw(); } });
 
-// 최종 이미지 만들기 (JPG로 저장, XXL은 회전)
+// 최종 이미지 만들기
 exportBtn.addEventListener('click', () => {
   if (!img){ alert('먼저 이미지를 넣어주세요.'); return; }
-  const s = SIZES[frame];
+  const t = TARGET[frame];
   const out = document.createElement('canvas');
-  out.width = s.w; out.height = s.h;
-  out.getContext('2d').drawImage(stage, 0,0);
+  out.width = t.w; out.height = t.h;
+  out.getContext('2d').drawImage(img, boxX, boxY, boxW, boxH, 0, 0, t.w, t.h);
 
   let finalCanvas = out;
   if (frame === 'XXL'){
     const rot = document.createElement('canvas');
-    rot.width = s.h; rot.height = s.w; // 512x1024 -> 1024x512
+    rot.width = t.h; rot.height = t.w; // 512x1024 -> 1024x512
     const rctx = rot.getContext('2d');
     rctx.translate(rot.width/2, rot.height/2);
-    rctx.rotate(90 * Math.PI/180);
+    rctx.rotate(-90 * Math.PI/180); // 왼쪽(반시계)으로 90도
     rctx.drawImage(out, -out.width/2, -out.height/2);
     finalCanvas = rot;
   }
 
-  finalCanvas.toBlob(blob => {
-    const url = URL.createObjectURL(blob);
-    resultDiv.innerHTML = `
-      <p>완성! (${(blob.size/1024).toFixed(0)} KB, ${finalCanvas.width}x${finalCanvas.height})</p>
-      <img src="${url}" style="max-width:300px;">
-      <p><a href="${url}" download="output.jpg">다운로드해서 확인해보기</a></p>
-    `;
-  }, 'image/jpeg', 0.92);
+  try {
+    finalCanvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      resultDiv.innerHTML = `
+        <p>완성! (${(blob.size/1024).toFixed(0)} KB, ${finalCanvas.width}x${finalCanvas.height})</p>
+        <img src="${url}" style="max-width:300px;">
+        <p><a href="${url}" download="output.jpg">다운로드해서 확인해보기</a></p>
+      `;
+    }, 'image/jpeg', 0.92);
+  } catch(err){
+    alert('이 이미지 주소는 보안 정책 때문에 지금 단계에서는 저장할 수 없어요. (3단계에서 해결됩니다)');
+  }
 });
 </script>
 </body>
