@@ -3,148 +3,173 @@
 <head>
 <meta charset="UTF-8">
 <title>러스트 액자 이미지 도구</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet"
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
 <style>
-:root {
-  --bg: #17181a;
-  --panel: #202225;
-  --rust: #c9622a;
-  --rust-bright: #e07b3a;
-  --border: #3a3d42;
-  --text: #d8d8d4;
-  --text-dim: #8a8d92;
+:root{
+  --bg:        #17140f;
+  --panel:     #201c17;
+  --panel-2:   #262019;
+  --line:      #3a332a;
+  --rust:      #c1592f;
+  --rust-2:    #e07641;
+  --steel:     #6f93a8;
+  --text:      #ece6da;
+  --muted:     #9a9184;
+  --radius:    2px;
 }
 
+*{ box-sizing:border-box; }
+
 body {
-  font-family: 'Consolas', 'Courier New', monospace;
+  font-family: 'PretendardVariable', -apple-system, 'Malgun Gothic', sans-serif;
   background:
-    radial-gradient(circle at 50% -10%, #2a2c2f 0%, var(--bg) 60%);
+    radial-gradient(circle at 15% 0%, rgba(193,89,47,0.08), transparent 40%),
+    radial-gradient(circle at 85% 100%, rgba(111,147,168,0.06), transparent 45%),
+    var(--bg);
   color: var(--text);
   text-align: center;
-  padding: 24px 16px;
-  letter-spacing: 0.3px;
+  padding: 32px 16px 80px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* 리벳 장식 라인 - 상단/구간마다 */
+body::before{
+  content:"";
+  display:block;
+  height:14px;
+  margin-bottom:24px;
+  background-image: radial-gradient(circle, var(--line) 2.5px, transparent 2.6px);
+  background-size: 22px 14px;
+  background-position: 11px 7px;
+  opacity:.8;
 }
 
 h2 {
-  color: var(--rust-bright);
-  text-transform: uppercase;
   font-size: 15px;
-  letter-spacing: 2px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
-  margin: 32px auto 16px;
-  max-width: 480px;
-  position: relative;
-}
-h2::before, h2::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  width: 6px; height: 6px;
-  background: var(--rust);
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px #00000055;
-}
-
-#stage {
-  background: #0c0d0e;
-  border: 2px solid var(--border);
-  outline: 1px solid #00000080;
-  position: relative;
-}
-
-.row { margin: 12px 0; }
-
-button {
-  background: linear-gradient(180deg, #2a2c2f, #1c1d1f);
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 9px 16px;
-  font-size: 13px;
-  font-family: inherit;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-}
-button:hover {
-  border-color: var(--rust);
-  color: var(--rust-bright);
-}
-button:active { transform: translateY(1px); }
-
-input[type=text] {
-  background: #0c0d0e;
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 9px 12px;
-  font-family: inherit;
-  font-size: 13px;
-  border-radius: 2px;
-}
-input[type=text]:focus {
-  outline: none;
-  border-color: var(--rust);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  margin: 30px 0 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
 }
 
-input[type=file] {
-  color: var(--text-dim);
-  font-size: 13px;
+.row {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 14px 0;
+  text-align: left;
 }
 
 label {
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
   padding: 8px 14px;
-  border-radius: 2px;
-  background: var(--panel);
+  border-radius: var(--radius);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 13.5px;
+}
+
+input[type=text] {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  font-size: 13.5px;
+  height: 40px;
+  font-family: inherit;
+}
+input[type=text]:focus { outline:none; border-color: var(--rust); }
+
+input[type=file] { color: var(--muted); font-size: 13.5px; }
+
+button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0 16px;
+  height: 40px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .05s;
+}
+button:hover { border-color: var(--rust); color: var(--rust-2); }
+button:active { transform: translateY(1px); }
+
+#exportBtn, #urlBtn {
+  background: var(--rust);
+  border-color: var(--rust);
+  color: #1a1108;
+}
+#exportBtn:hover, #urlBtn:hover { background: var(--rust-2); border-color: var(--rust-2); color:#1a1108; }
+
+#stage {
+  background:
+    linear-gradient(45deg,#2a251e 25%,transparent 25%),
+    linear-gradient(-45deg,#2a251e 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#2a251e 75%),
+    linear-gradient(-45deg,transparent 75%,#2a251e 75%),
+    #1b1712;
+  background-size:16px 16px;
+  background-position:0 0,0 8px,8px -8px,-8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 #result {
-  margin-top: 16px;
-  border: 1px solid var(--border);
   background: var(--panel);
-  display: inline-block;
-  padding: 16px 20px;
-  border-radius: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-top: 16px;
   position: relative;
 }
-#result::before, #result::after,
-#urlBox::before, #urlBox::after {
-  content: "";
-  position: absolute;
-  width: 8px; height: 8px;
-  border-radius: 50%;
+#result::before, #result::after {
+  content:"";
+  position:absolute;
+  width:8px; height:8px;
+  border-radius:50%;
   background: radial-gradient(circle at 35% 35%, #6b6b6b, #2b2b2b);
   box-shadow: 0 0 0 1px #000;
+  top: 8px;
 }
-#result::before { top: 6px; left: 6px; }
-#result::after  { top: 6px; right: 6px; }
+#result::before { left: 8px; }
+#result::after { right: 8px; }
 
 #result img {
   border: 1px solid var(--rust);
+  border-radius: var(--radius);
   max-width: 300px;
   display: block;
   margin: 10px auto;
 }
 
 #urlBox {
-  background: #0c0d0e;
+  background: var(--panel-2);
   border: 1px solid var(--rust);
+  border-radius: var(--radius);
   padding: 14px 18px;
-  border-radius: 2px;
   display: inline-block;
   margin-top: 12px;
-  position: relative;
 }
-#urlBox input {
-  width: 320px;
-  margin-right: 8px;
-}
+#urlBox input { width: 300px; margin-right: 8px; }
 
-small { color: var(--text-dim); }
-#status { color: var(--rust-bright); }
+small { color: var(--muted); }
+#status { color: var(--rust-2); font-weight: 600; }
 </style>
 </head>
 <body>
